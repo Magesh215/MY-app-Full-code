@@ -1,0 +1,29 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+venv/
+
+# node / frontend
+node_modules/
+package.json
+package-lock.json
+.expo/
+src/
+
+# db / data
+*.db
+data/
+
+# logs
+logs/
+*.log
+
+# editor
+.vscode/
+.idea/
+
+# mock
+demo_candles.py
