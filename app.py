@@ -11,8 +11,11 @@ from services.strategy_scheduler import start_scheduler
 from services.timeframe_service import get_timeframe_candles
 from services.pnl_engine import get_live_pnl
 from services.algo_state import (
-    start_algo, stop_algo, set_mode,
-    request_force_exit, is_algo_running
+    start_algo,
+    stop_algo,
+    set_mode,
+    request_force_exit,
+    is_algo_running,
 )
 
 MODE = os.getenv("MODE", "DEMO").upper()
@@ -32,6 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ================= HISTORICAL LOADER (LOCKED) =================
+
 def load_historical_once():
     kite = get_kite()
     end = datetime.now()
@@ -39,17 +44,25 @@ def load_historical_once():
 
     for symbol, token in SYMBOLS.items():
         candles = kite.historical_data(
-            token, start, end, "minute"
+            instrument_token=token,
+            from_date=start,
+            to_date=end,
+            interval="minute"
         )
+
         for c in candles:
+            ts = int(c["date"].timestamp())
             save_candle(symbol, {
-                "timestamp": int(c["date"].timestamp()) - (int(c["date"].timestamp()) % 60),
+                "timestamp": ts - (ts % 60),   # 🔒 FIXED: 1-minute precision
                 "open": c["open"],
                 "high": c["high"],
                 "low": c["low"],
                 "close": c["close"],
             })
+
         print(f"📥 Loaded historical candles: {symbol} ({len(candles)})")
+
+# ================= STARTUP =================
 
 @app.on_event("startup")
 def startup():
@@ -60,23 +73,50 @@ def startup():
     start_scheduler()
     print(f"🔥 Backend started | MODE={MODE}")
 
+# ================= ALGO CONTROL =================
+
 @app.post("/api/algo/start")
 def algo_start(mode: str = Query(...)):
     set_mode(mode.upper())
-    return {"status": "started" if start_algo() else "already running"}
+    return {
+        "status": "started" if start_algo() else "already running",
+        "mode": mode.upper(),
+    }
 
 @app.post("/api/algo/stop")
 def algo_stop():
     stop_algo()
     return {"status": "stopped"}
 
+@app.post("/api/positions/force-exit")
+def force_exit():
+    request_force_exit()
+    return {"status": "force exit requested"}
+
+# ================= CANDLES =================
+
 @app.get("/api/candles")
-def api_candles(symbol: str, interval: str | None = None):
-    return (
-        get_timeframe_candles(symbol, interval)
-        if interval else get_candles(symbol)
-    )
+def api_candles(
+    symbol: str = Query(...),
+    interval: str | None = Query(None)
+):
+    if interval:
+        data = get_timeframe_candles(symbol, interval)
+        if data:
+            return data
+    return get_candles(symbol)
+
+# ================= PNL =================
+
+@app.get("/api/pnl/live")
+def pnl():
+    return get_live_pnl("NIFTY")
+
+# ================= HEALTH =================
 
 @app.get("/health")
 def health():
-    return {"mode": MODE, "algo_running": is_algo_running()}
+    return {
+        "mode": MODE,
+        "algo_running": is_algo_running()
+    }
